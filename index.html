@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrossInk Mod Loader</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8;
+    --accent: #2f5d50; --accent-ink: #ffffff; --warn: #8a5a00; --bad: #9b2c2c; --good: #2f6b3a;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161614; --card: #1f1f1c; --ink: #ecebe6; --muted: #a3a29b; --line: #34332e;
+            --accent: #7fb8a4; --accent-ink: #0f1a16; --warn: #e0b45c; --bad: #ef8f8f; --good: #8fd19e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 28px 18px 60px; }
+  h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 22px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .tab { appearance: none; border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600;
+         padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  section[hidden] { display: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  .mod { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--line);
+         border-radius: 8px; cursor: pointer; }
+  .mod:hover { border-color: var(--accent); }
+  .mod input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+  .mod b { display: block; }
+  .mod span { color: var(--muted); font-size: 13px; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); min-width: 160px; }
+  input[type=text], input[type=password], input[type=number], select {
+    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
+    padding: 8px 10px; min-width: 0; }
+  input[type=number] { width: 90px; }
+  .btn { appearance: none; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+         font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 8px; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .note { color: var(--muted); font-size: 13px; }
+  .status { margin-top: 12px; font-size: 14px; }
+  .status .good { color: var(--good); } .status .bad { color: var(--bad); } .status .warn { color: var(--warn); }
+  table.runs { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 8px; }
+  table.runs td, table.runs th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  details summary { cursor: pointer; color: var(--muted); }
+  .settings-list { display: grid; gap: 8px; }
+  .setting { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0;
+             border-bottom: 1px solid var(--line); }
+  .setting:last-child { border-bottom: 0; }
+  .setting .label b { display: block; font-weight: 600; }
+  .setting .label span { color: var(--muted); font-size: 13px; }
+  .switch { position: relative; width: 42px; height: 24px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch i { position: absolute; inset: 0; background: var(--line); border-radius: 24px; transition: .15s; }
+  .switch i::after { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+                     background: var(--card); border-radius: 50%; transition: .15s; }
+  .switch input:checked + i { background: var(--accent); }
+  .switch input:checked + i::after { left: 21px; }
+  .group-title { font-weight: 700; margin: 8px 0 2px; }
+  code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CrossInk Mod Loader</h1>
+  <p class="sub">Build firmware with the mods you want, or change which mods are on for a reader, all from here.</p>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="build">Build firmware</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="settings">Reader settings (SD card)</button>
+  </div>
+
+  <!-- =============================== BUILD =============================== -->
+  <section id="tab-build">
+    <div class="card">
+      <h2>1. Choose mods</h2>
+      <div class="grid" id="mod-picks"></div>
+      <p class="note">Mods you leave out are not in the firmware at all. Mods you include can still be switched on and off on the reader in <i>Settings → Mods → Mod Manager</i>.</p>
+    </div>
+
+    <div class="card">
+      <h2>2. Options</h2>
+      <div class="row">
+        <label class="field">Readers
+          <select id="devices">
+            <option value="both">X4 and X4 Pro</option>
+            <option value="x4">X4 only</option>
+            <option value="x4-pro">X4 Pro only</option>
+          </select>
+        </label>
+        <label class="field">Menu languages
+          <select id="lang-mode">
+            <option value="all">All languages</option>
+            <option value="en">English only (frees ~450 KB on the X4)</option>
+            <option value="custom">Choose…</option>
+          </select>
+        </label>
+        <label class="field" id="lang-custom-wrap" hidden>Language codes
+          <input type="text" id="lang-custom" placeholder="en,de,fr">
+        </label>
+        <label class="field">CrossInk version
+          <input type="text" id="version" value="v1.6.1">
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. Build</h2>
+      <div class="row">
+        <label class="field" style="flex:1">GitHub repository
+          <input type="text" id="repo" value="owena613-afk/crossink-mods-builder">
+        </label>
+        <label class="field" style="flex:1">Access token
+          <input type="password" id="token" placeholder="github_pat_… (saved only in this browser)">
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn" id="build-btn">Build firmware</button>
+        <button class="btn ghost" id="open-form">Open the GitHub form instead</button>
+        <button class="btn ghost" id="forget-token">Forget token</button>
+      </div>
+      <div class="status" id="build-status"></div>
+      <details style="margin-top:12px">
+        <summary>How do I get an access token?</summary>
+        <ol class="note">
+          <li>On GitHub: your picture → <b>Settings</b> → <b>Developer settings</b> → <b>Personal access tokens</b> → <b>Fine-grained tokens</b> → <b>Generate new token</b>.</li>
+          <li>Repository access: <b>Only select repositories</b> → <code>crossink-mods-builder</code>.</li>
+          <li>Permissions: <b>Actions: Read and write</b> (everything else can stay at no access).</li>
+          <li>Generate, copy it, and paste it above. It stays in this browser only and is sent only to GitHub.</li>
+        </ol>
+        <p class="note">No token? Use <b>Open the GitHub form instead</b>: it opens the same build form on GitHub, where you tick the same boxes.</p>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>Recent builds</h2>
+      <div class="actions" style="margin-top:0"><button class="btn ghost" id="refresh-runs">Refresh</button></div>
+      <table class="runs"><thead><tr><th>Build</th><th>Started</th><th>Status</th><th></th></tr></thead>
+        <tbody id="runs"><tr><td colspan="4" class="note">Add a token to see builds here.</td></tr></tbody></table>
+      <p class="note">Finished builds have a <b>Download</b> link to the build's page on GitHub; the firmware is under <b>Artifacts</b>. Copy the <code>.bin</code> to the reader's SD card and use <i>Settings → System → SD Card Firmware Update</i>.</p>
+    </div>
+  </section>
+
+  <!-- ============================== SETTINGS ============================= -->
+  <section id="tab-settings" hidden>
+    <div class="card">
+      <h2>Edit a reader's mod settings</h2>
+      <p class="note">The reader keeps its mod settings in <code>/.crosspoint/mods/settings.json</code> on its SD card. Open that file (or start from the defaults), change what you like, save, and copy it back. The reader picks it up the next time it starts or wakes.</p>
+      <div class="actions">
+        <label class="btn ghost" style="display:inline-block">Open settings.json…<input type="file" id="file-in" accept=".json,application/json" hidden></label>
+        <button class="btn ghost" id="reset-defaults">Start from defaults</button>
+        <button class="btn" id="save-json">Save settings.json</button>
+      </div>
+      <div class="status" id="settings-status"></div>
+    </div>
+    <div class="card"><div class="settings-list" id="settings-list"></div></div>
+  </section>
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Mod catalogue (keep in step with mods/ModConfig.h and the workflow inputs).
+const MODS = [
+  { id: "handoff", name: "Handoff", desc: "Sync position, books, bookmarks and stats between two readers." },
+  { id: "advanced_stats", name: "Advanced Stats", desc: "Daily and weekly stats, insights, battery reading time." },
+  { id: "power", name: "Power", desc: "Shorter auto-sleep outside books." },
+  { id: "quick_wake", name: "Quick Wake", desc: "Your page on wake instead of the boot screen." },
+  { id: "night", name: "Night", desc: "Dark mode at night, sleep sooner, stop at chapter end." },
+  { id: "charge_reminder", name: "Charge Reminder", desc: "Sleep-screen badge when a reader is low." },
+];
+
+// On-device settings (keys and ranges match mods/ModSettings.cpp).
+const ON_OFF = [["0", "Off"], ["1", "On"]];
+const HOURS = Array.from({ length: 24 }, (_, h) => [String(h), String(h).padStart(2, "0") + ":00"]);
+const SETTINGS = [
+  { group: "Mod Manager" },
+  { key: "modHandoff", label: "Handoff", def: 1, type: "switch" },
+  { key: "statsDailyLog", label: "Advanced Stats (Daily Reading Log)", def: 1, type: "switch" },
+  { key: "modPower", label: "Power Tweaks", def: 1, type: "switch" },
+  { key: "modQuickWake", label: "Quick Wake (Show Page on Wake)", def: 1, type: "switch" },
+  { key: "modNight", label: "Night", def: 1, type: "switch" },
+  { key: "modCharge", label: "Charge Reminder", def: 1, type: "switch" },
+  { group: "Handoff" },
+  { key: "handoffAutoSync", label: "Auto Sync While Asleep", def: 3, type: "select",
+    options: [["0", "Off"], ["1", "Every 15 sec"], ["2", "Every 30 sec"], ["3", "Every 1 min"], ["4", "Every 2 min"]],
+    help: "On the X4, anything but Off keeps it in standby instead of fully off." },
+  { key: "handoffOnWake", label: "Handoff on Wake", def: 5, type: "select",
+    options: [["0", "Off"], ["1", "5 sec"], ["2", "10 sec"], ["3", "20 sec"], ["4", "30 sec"], ["5", "Auto"]] },
+  { key: "handoffBaton", label: "Take Turns Listening", def: 0, type: "switch" },
+  { key: "handoffChargeListen", label: "Listen While Charging", def: 0, type: "switch" },
+  { key: "handoffSendBooks", label: "Send Missing Books", def: 1, type: "switch" },
+  { key: "handoffAllBooks", label: "Sync All Recent Books", def: 1, type: "switch" },
+  { key: "handoffSyncMarks", label: "Sync Bookmarks & Highlights", def: 1, type: "switch" },
+  { key: "handoffBookStats", label: "Combine Book Stats", def: 1, type: "switch" },
+  { key: "handoffShareTime", label: "Share Clock Time", def: 1, type: "switch" },
+  { key: "handoffNightQuiet", label: "Night Quiet Hours", def: 1, type: "switch" },
+  { key: "handoffNightResume", label: "Listen Again At", def: 8, type: "select", options: HOURS },
+  { group: "Night" },
+  { key: "nightStart", label: "Night Starts", def: 23, type: "select", options: HOURS },
+  { key: "nightEnd", label: "Night Ends", def: 4, type: "select", options: HOURS },
+  { key: "nightDarkMode", label: "Dark Mode at Night", def: 0, type: "switch" },
+  { key: "nightSleepSooner", label: "Sleep Sooner at Night", def: 0, type: "select",
+    options: [["0", "Off"], ["1", "2 min"], ["2", "5 min"], ["3", "10 min"], ["4", "15 min"]] },
+  { key: "nightChapterStop", label: "Stop at Chapter End", def: 0, type: "switch" },
+  { group: "Power & Charge" },
+  { key: "homeSleepTimeout", label: "Sleep Outside Books", def: 0, type: "select",
+    options: [["0", "Same as reading"], ["1", "1 min"], ["2", "2 min"], ["3", "3 min"], ["4", "5 min"]] },
+  { key: "chargeReminderPercent", label: "Charge Reminder below (%)", def: 20, type: "number", min: 5, max: 50, step: 5 },
+];
+const HIDDEN_KEYS = ["nightDarkApplied"];  // Internal state the reader manages; kept as loaded.
+
+// ---------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const store = window.localStorage;
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+    $("tab-build").hidden = tab.dataset.tab !== "build";
+    $("tab-settings").hidden = tab.dataset.tab !== "settings";
+  });
+});
+
+// ---- Build tab ----
+const picks = $("mod-picks");
+MODS.forEach((m) => {
+  const el = document.createElement("label");
+  el.className = "mod";
+  el.innerHTML = `<input type="checkbox" id="mod-${m.id}" checked><div><b>${m.name}</b><span>${m.desc}</span></div>`;
+  picks.appendChild(el);
+});
+$("lang-mode").addEventListener("change", () => { $("lang-custom-wrap").hidden = $("lang-mode").value !== "custom"; });
+$("token").value = store.getItem("cimods.token") || "";
+$("repo").value = store.getItem("cimods.repo") || $("repo").value;
+$("token").addEventListener("change", () => store.setItem("cimods.token", $("token").value.trim()));
+$("repo").addEventListener("change", () => store.setItem("cimods.repo", $("repo").value.trim()));
+$("forget-token").addEventListener("click", () => { store.removeItem("cimods.token"); $("token").value = ""; say("build-status", "Token removed from this browser.", "good"); });
+
+function say(id, text, kind) { $(id).innerHTML = kind ? `<span class="${kind}">${text}</span>` : text; }
+
+function languages() {
+  const mode = $("lang-mode").value;
+  if (mode !== "custom") return mode;
+  const v = $("lang-custom").value.toLowerCase().replace(/\s+/g, "");
+  return /^[a-z]{2}(-[a-z]{2})?(,[a-z]{2}(-[a-z]{2})?)*$/.test(v) ? v : null;
+}
+
+function api(path, options = {}) {
+  const token = $("token").value.trim();
+  return fetch(`https://api.github.com/repos/${$("repo").value.trim()}${path}`, {
+    ...options,
+    headers: { "Accept": "application/vnd.github+json", "Authorization": `Bearer ${token}`,
+               "X-GitHub-Api-Version": "2022-11-28", ...(options.headers || {}) },
+  });
+}
+
+$("open-form").addEventListener("click", () => {
+  window.open(`https://github.com/${$("repo").value.trim()}/actions/workflows/build.yml`, "_blank", "noopener");
+  say("build-status", "On GitHub, press <b>Run workflow</b>, tick the same boxes, and press the green <b>Run workflow</b> button.");
+});
+
+$("build-btn").addEventListener("click", async () => {
+  const langs = languages();
+  if (!langs) { say("build-status", "Language codes look wrong. Use two-letter codes separated by commas, for example en,de.", "bad"); return; }
+  if (!$("token").value.trim()) { say("build-status", "Add an access token first (see <b>How do I get an access token?</b>), or use <b>Open the GitHub form instead</b>.", "warn"); return; }
+  const inputs = { crossink_version: $("version").value.trim() || "v1.6.1", languages: langs, devices: $("devices").value };
+  MODS.forEach((m) => { inputs[m.id] = String($(`mod-${m.id}`).checked); });
+  $("build-btn").disabled = true;
+  say("build-status", "Starting the build…");
+  try {
+    const res = await api("/actions/workflows/build.yml/dispatches", { method: "POST", body: JSON.stringify({ ref: "main", inputs }) });
+    if (res.status === 204) {
+      say("build-status", "Build started. It takes about 20–35 minutes; this page checks every 30 seconds.", "good");
+      setTimeout(loadRuns, 4000);
+    } else {
+      const body = await res.json().catch(() => ({}));
+      say("build-status", `GitHub said no (${res.status}): ${body.message || "unknown error"}. Check the token has Actions: Read and write for this repository.`, "bad");
+    }
+  } catch (e) {
+    say("build-status", `Could not reach GitHub: ${e.message}`, "bad");
+  } finally {
+    $("build-btn").disabled = false;
+  }
+});
+
+async function loadRuns() {
+  if (!$("token").value.trim()) return;
+  try {
+    const res = await api("/actions/workflows/build.yml/runs?per_page=8");
+    if (!res.ok) { $("runs").innerHTML = `<tr><td colspan="4" class="note">Could not load builds (${res.status}).</td></tr>`; return; }
+    const data = await res.json();
+    if (!data.workflow_runs.length) { $("runs").innerHTML = `<tr><td colspan="4" class="note">No builds yet.</td></tr>`; return; }
+    $("runs").innerHTML = data.workflow_runs.map((r) => {
+      const when = new Date(r.created_at).toLocaleString();
+      const state = r.status !== "completed" ? `<span class="warn">${r.status.replace("_", " ")}…</span>`
+                  : r.conclusion === "success" ? `<span class="good">ready</span>` : `<span class="bad">${r.conclusion}</span>`;
+      const link = r.status === "completed" && r.conclusion === "success"
+        ? `<a href="${r.html_url}#artifacts" target="_blank" rel="noopener">Download</a>`
+        : `<a href="${r.html_url}" target="_blank" rel="noopener">Details</a>`;
+      return `<tr><td>#${r.run_number}</td><td>${when}</td><td>${state}</td><td>${link}</td></tr>`;
+    }).join("");
+  } catch (e) {
+    $("runs").innerHTML = `<tr><td colspan="4" class="note">Could not reach GitHub: ${e.message}</td></tr>`;
+  }
+}
+$("refresh-runs").addEventListener("click", loadRuns);
+loadRuns();
+setInterval(loadRuns, 30000);
+
+// ---- Settings tab ----
+let values = {};
+let extra = {};  // Keys we do not edit, kept as loaded.
+
+function defaults() {
+  values = {};
+  SETTINGS.forEach((s) => { if (s.key) values[s.key] = s.def; });
+  extra = { nightDarkApplied: 0 };
+}
+
+function renderSettings() {
+  const list = $("settings-list");
+  list.innerHTML = "";
+  SETTINGS.forEach((s) => {
+    if (s.group) {
+      const g = document.createElement("div");
+      g.className = "group-title";
+      g.textContent = s.group;
+      list.appendChild(g);
+      return;
+    }
+    const row = document.createElement("div");
+    row.className = "setting";
+    const label = `<div class="label"><b>${s.label}</b>${s.help ? `<span>${s.help}</span>` : ""}</div>`;
+    let control = "";
+    if (s.type === "switch") {
+      control = `<label class="switch"><input type="checkbox" data-key="${s.key}" ${values[s.key] ? "checked" : ""}><i></i></label>`;
+    } else if (s.type === "select") {
+      control = `<select data-key="${s.key}">${s.options.map(([v, t]) => `<option value="${v}" ${String(values[s.key]) === v ? "selected" : ""}>${t}</option>`).join("")}</select>`;
+    } else {
+      control = `<input type="number" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${values[s.key]}">`;
+    }
+    row.innerHTML = label + control;
+    list.appendChild(row);
+  });
+  list.querySelectorAll("[data-key]").forEach((el) => {
+    el.addEventListener("change", () => {
+      const s = SETTINGS.find((x) => x.key === el.dataset.key);
+      if (s.type === "switch") values[s.key] = el.checked ? 1 : 0;
+      else if (s.type === "select") values[s.key] = Number(el.value);
+      else values[s.key] = Math.min(s.max, Math.max(s.min, Math.round(Number(el.value) / s.step) * s.step || s.def));
+    });
+  });
+}
+
+$("file-in").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  try {
+    const json = JSON.parse(await file.text());
+    defaults();
+    SETTINGS.forEach((s) => { if (s.key && Number.isInteger(json[s.key])) values[s.key] = json[s.key]; });
+    HIDDEN_KEYS.forEach((k) => { if (Number.isInteger(json[k])) extra[k] = json[k]; });
+    renderSettings();
+    say("settings-status", `Loaded ${file.name}.`, "good");
+  } catch (e) {
+    say("settings-status", `That file isn't a mod settings file (${e.message}).`, "bad");
+  }
+  ev.target.value = "";
+});
+
+$("reset-defaults").addEventListener("click", () => { defaults(); renderSettings(); say("settings-status", "Defaults loaded.", "good"); });
+
+$("save-json").addEventListener("click", () => {
+  const out = { version: 1, ...values, ...extra };
+  const blob = new Blob([JSON.stringify(out)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "settings.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  say("settings-status", "Saved. Copy <code>settings.json</code> to the reader's SD card as <code>/.crosspoint/mods/settings.json</code> (replace the old one), then put the card back and wake the reader.", "good");
+});
+
+defaults();
+renderSettings();
+</script>
+</body>
+</html>
