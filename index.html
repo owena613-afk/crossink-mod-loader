@@ -74,6 +74,9 @@
   .setting > .switch, .setting > select { flex: none; }
   .setting select { max-width: 200px; }
   @media (max-width: 560px) { .setting { flex-wrap: wrap; } }
+  #flash-bar { width: 100%; height: 10px; margin-top: 12px; accent-color: var(--accent); }
+  #flash-log { max-height: 220px; overflow: auto; font-size: 12px; background: var(--bg); padding: 8px; border-radius: 6px; white-space: pre-wrap; }
+  #fw-list { margin: 10px 0 0; padding-left: 20px; }
   code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
 </style>
 </head>
@@ -84,6 +87,7 @@
 
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-tab="build">Build firmware</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="flash">Flash a reader (USB)</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="settings">Reader settings (SD card)</button>
   </div>
 
@@ -154,7 +158,39 @@
       <div class="actions" style="margin-top:0"><button class="btn ghost" id="refresh-runs">Refresh</button></div>
       <table class="runs"><thead><tr><th>Build</th><th>Started</th><th>Status</th><th></th></tr></thead>
         <tbody id="runs"><tr><td colspan="4" class="note">Add a token to see builds here.</td></tr></tbody></table>
-      <p class="note">Finished builds have a <b>Download</b> link to the build's page on GitHub; the firmware is under <b>Artifacts</b>. Copy the <code>.bin</code> to the reader's SD card and use <i>Settings → System → SD Card Firmware Update</i>.</p>
+      <p class="note">Finished builds have a <b>Download</b> link to the build's page on GitHub; the firmware is under <b>Artifacts</b>. Download the zip, then put it on a reader with the <b>Flash a reader (USB)</b> tab.</p>
+    </div>
+  </section>
+
+  <!-- =============================== FLASH =============================== -->
+  <section id="tab-flash" hidden>
+    <div class="card">
+      <h2>1. Choose the firmware</h2>
+      <p class="note">Pick the zip you downloaded from a finished build (under <b>Artifacts</b> on its GitHub page), or a single <code>.bin</code>. A zip holds the X4 and X4 Pro firmware; the right one is picked for whichever reader you plug in.</p>
+      <div class="actions">
+        <label class="btn ghost" style="display:inline-block">Choose firmware…<input type="file" id="fw-in" accept=".zip,.bin" hidden></label>
+      </div>
+      <ul class="note" id="fw-list"></ul>
+    </div>
+    <div class="card">
+      <h2>2. Connect and flash</h2>
+      <ol class="note">
+        <li>Plug the reader into this computer with a USB cable that carries data. It can be on any screen, or asleep.</li>
+        <li>Press <b>Connect reader</b> and pick <b>USB JTAG/serial debug unit</b> (on some computers it's called <b>USB Serial Device</b>).</li>
+        <li>Press <b>Flash</b>. It takes about a minute, then the reader restarts on its own.</li>
+      </ol>
+      <div class="actions">
+        <button class="btn ghost" id="flash-connect">Connect reader</button>
+        <button class="btn" id="flash-btn" disabled>Flash</button>
+      </div>
+      <progress id="flash-bar" max="1" value="0" hidden></progress>
+      <div class="status" id="flash-status"></div>
+      <p class="note">Only the firmware is replaced: your books, reading progress, sleep images and settings live on the SD card and aren't touched. The reader keeps its own firmware layout; this writes the slot it already starts from and checks every byte afterwards.</p>
+      <details><summary>Details</summary><pre id="flash-log"></pre></details>
+    </div>
+    <div class="card">
+      <h2>No Chrome or Edge?</h2>
+      <p class="note">Copy the reader's <code>.bin</code> (from inside the zip) to its SD card and use <i>Settings → System → SD Card Firmware Update</i> on the reader.</p>
     </div>
   </section>
 
@@ -327,6 +363,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
     document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
     $("tab-build").hidden = tab.dataset.tab !== "build";
     $("tab-settings").hidden = tab.dataset.tab !== "settings";
+    $("tab-flash").hidden = tab.dataset.tab !== "flash";
   });
 });
 
@@ -496,6 +533,234 @@ $("save-json").addEventListener("click", () => {
 
 defaults();
 renderSettings();
+</script>
+<script type="module">
+// ---- Flasher: pure helpers (no browser APIs beyond DecompressionStream) ----
+const READERS = { 5: { chip: "ESP32-C3", name: "X4" }, 9: { chip: "ESP32-S3", name: "X4 Pro" } };
+
+function u16(d, o) { return d[o] | (d[o + 1] << 8); }
+function u32(d, o) { return (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0; }
+
+// zlib-style CRC-32 with a starting value (the ESP-IDF boot record uses start 0xFFFFFFFF).
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(data, start = 0) {
+  let c = ~start >>> 0;
+  for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]) & 0xff] ^ (c >>> 8);
+  return ~c >>> 0;
+}
+
+// MD5 as lowercase hex, for checking what the reader's flash holds after writing.
+function md5hex(data) {
+  const K = new Uint32Array(64), S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) >>> 0;
+  const len = data.length, total = ((len + 8) >> 6) + 1 << 6;
+  const buf = new Uint8Array(total);
+  buf.set(data); buf[len] = 0x80;
+  const bits = len * 8;
+  for (let i = 0; i < 8; i++) buf[total - 8 + i] = Math.floor(bits / 2 ** (8 * i)) & 0xff;
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  const M = new Uint32Array(16);
+  for (let off = 0; off < total; off += 64) {
+    for (let i = 0; i < 16; i++) M[i] = u32(buf, off + i * 4);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) & 15; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) & 15; }
+      else { F = C ^ (B | ~D); g = (7 * i) & 15; }
+      F = (F + A + K[i] + M[g]) >>> 0;
+      A = D; D = C; C = B;
+      const s = S[(i >> 4) * 4 + (i & 3)];
+      B = (B + ((F << s) | (F >>> (32 - s)))) >>> 0;
+    }
+    a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+  }
+  return [a0, b0, c0, d0].map((w) => [0, 8, 16, 24].map((s) => ((w >>> s) & 0xff).toString(16).padStart(2, "0")).join("")).join("");
+}
+
+// Firmware files from a .bin or a GitHub artifact .zip. Returns [{ name, data }].
+async function firmwareFiles(name, bytes) {
+  if (!/\.zip$/i.test(name)) return [{ name, data: bytes }];
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (u32(bytes, i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("that zip file looks damaged");
+  const count = u16(bytes, eocd + 10);
+  let p = u32(bytes, eocd + 16);
+  const out = [];
+  for (let n = 0; n < count; n++) {
+    if (u32(bytes, p) !== 0x02014b50) throw new Error("that zip file looks damaged");
+    const method = u16(bytes, p + 10), csize = u32(bytes, p + 20), nlen = u16(bytes, p + 28);
+    const elen = u16(bytes, p + 30), clen = u16(bytes, p + 32), local = u32(bytes, p + 42);
+    const fname = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nlen));
+    p += 46 + nlen + elen + clen;
+    if (!/\.bin$/i.test(fname)) continue;
+    const start = local + 30 + u16(bytes, local + 26) + u16(bytes, local + 28);
+    const raw = bytes.subarray(start, start + csize);
+    let data;
+    if (method === 0) data = raw.slice();
+    else if (method === 8) data = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+    else throw new Error(`${fname} uses an unsupported zip compression`);
+    out.push({ name: fname.split("/").pop(), data });
+  }
+  return out;
+}
+
+// Which reader a firmware image is for, from its ESP image header; null if it isn't one.
+function imageReader(data) {
+  if (data.length < 24 || data[0] !== 0xe9) return null;
+  return READERS[u16(data, 12)] || null;
+}
+
+// App slots and the boot record from the reader's partition table (read at 0x8000).
+function parsePartitions(table) {
+  const apps = [];
+  let otadata = null;
+  for (let o = 0; o + 32 <= table.length; o += 32) {
+    if (table[o] !== 0xaa || table[o + 1] !== 0x50) break;
+    const type = table[o + 2], sub = table[o + 3], offset = u32(table, o + 4), size = u32(table, o + 8);
+    const label = new TextDecoder().decode(table.subarray(o + 12, o + 28)).replace(/\0.*$/s, "");
+    if (type === 0 && sub >= 0x10 && sub < 0x20) apps.push({ label, offset, size, ota: sub - 0x10 });
+    if (type === 1 && sub === 0) otadata = { offset, size };
+  }
+  apps.sort((a, b) => a.ota - b.ota);
+  return { apps, otadata };
+}
+
+// The slot the reader boots from: the valid boot record entry with the highest sequence number.
+function activeSlot(apps, otadata) {
+  let best = 0;
+  for (const o of [0, 0x1000]) {
+    if (!otadata || o + 32 > otadata.length) continue;
+    const seq = u32(otadata, o), state = u32(otadata, o + 24), crc = u32(otadata, o + 28);
+    if (seq === 0xffffffff || seq === 0) continue;
+    if (state === 3 || state === 4) continue;  // Marked invalid or aborted.
+    if (crc32(otadata.subarray(o, o + 4), 0xffffffff) !== crc) continue;
+    best = Math.max(best, seq);
+  }
+  if (!best) return apps[0];  // No record yet: the bootloader starts the first slot.
+  return apps.find((a) => a.ota === (best - 1) % apps.length);
+}
+
+// ---- Flasher: talking to the reader (Web Serial + esptool-js) ----
+const fx = (id) => document.getElementById(id);
+let fwFiles = [];      // [{ name, data, reader }]
+let conn = null;       // { loader, transport, reader, slot }
+const fsay = (text, kind) => { fx("flash-status").innerHTML = kind ? `<span class="${kind}">${text}</span>` : text; };
+const flog = (line) => { const el = fx("flash-log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight; };
+const mb = (n) => (n / 1048576).toFixed(1) + " MB";
+
+async function loadEsptool() {
+  try { return await import("./vendor/esptool-js-0.7.1.js"); }
+  catch { return await import("https://cdn.jsdelivr.net/npm/esptool-js@0.7.1/bundle.js"); }
+}
+
+function refreshFlashUi() {
+  const fw = conn && fwFiles.find((f) => f.reader && f.reader.chip === conn.reader.chip);
+  fx("flash-btn").disabled = !fw;
+  fx("flash-connect").textContent = conn ? "Disconnect" : "Connect reader";
+  if (!conn) return;
+  const where = `It starts from <b>${conn.slot.label}</b>, so that's the only part that gets replaced.`;
+  if (!fwFiles.length) fsay(`Connected to the <b>${conn.reader.name}</b>. ${where} Now choose the firmware above.`, "good");
+  else if (!fw) fsay(`Connected to the <b>${conn.reader.name}</b>, but none of the chosen files is ${conn.reader.name} firmware.`, "bad");
+  else if (fw.data.length > conn.slot.size) fsay(`${fw.name} is too big for this reader (${mb(fw.data.length)}, room for ${mb(conn.slot.size)}).`, "bad");
+  else fsay(`Ready: <b>${fw.name}</b> (${mb(fw.data.length)}) → the ${conn.reader.name}. ${where} Press <b>Flash</b>.`, "good");
+  if (fw && fw.data.length > conn.slot.size) fx("flash-btn").disabled = true;
+}
+
+fx("fw-in").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  try {
+    const files = await firmwareFiles(file.name, new Uint8Array(await file.arrayBuffer()));
+    fwFiles = files.map((f) => ({ ...f, reader: imageReader(f.data) })).filter((f) => f.reader);
+    fx("fw-list").innerHTML = fwFiles.length
+      ? fwFiles.map((f) => `<li><b>${f.reader.name}</b>: ${f.name} (${mb(f.data.length)})</li>`).join("")
+      : `<li class="bad">No reader firmware in ${file.name}.</li>`;
+    refreshFlashUi();
+  } catch (e) {
+    fx("fw-list").innerHTML = `<li class="bad">Couldn't read ${file.name}: ${e.message}.</li>`;
+  }
+  ev.target.value = "";
+});
+
+async function disconnect() {
+  if (!conn) return;
+  try { await conn.transport.disconnect(); } catch {}
+  conn = null;
+}
+
+fx("flash-connect").addEventListener("click", async () => {
+  if (conn) { await disconnect(); fsay("Disconnected."); refreshFlashUi(); return; }
+  if (!("serial" in navigator)) { fsay("This browser can't reach USB devices. Open this page in Chrome or Edge on a computer.", "bad"); return; }
+  let port;
+  try { port = await navigator.serial.requestPort(); } catch { return; }  // Picker closed.
+  fx("flash-connect").disabled = true;
+  fsay("Connecting… the reader's screen stays as it is while it's in flashing mode.");
+  try {
+    const { ESPLoader, Transport } = await loadEsptool();
+    const transport = new Transport(port, false);
+    const terminal = { clean() {}, writeLine: flog, write: (s) => flog(s.replace(/\n$/, "")) };
+    const loader = new ESPLoader({ transport, baudrate: 921600, terminal });
+    await loader.main("default_reset");
+    const chip = loader.chip.CHIP_NAME;
+    const reader = Object.values(READERS).find((r) => r.chip === chip);
+    if (!reader) { await transport.disconnect(); fsay(`That's an ${chip}, not an X4 or X4 Pro.`, "bad"); return; }
+    const table = parsePartitions(await loader.readFlash(0x8000, 0xc00));
+    if (table.apps.length < 1 || !table.otadata) throw new Error("couldn't find the reader's firmware slots");
+    const record = await loader.readFlash(table.otadata.offset, table.otadata.size);
+    const slot = activeSlot(table.apps, record);
+    flog(`Firmware slots: ${table.apps.map((a) => `${a.label} @0x${a.offset.toString(16)}`).join(", ")}; starts from ${slot.label}`);
+    conn = { loader, transport, reader, slot };
+    refreshFlashUi();
+  } catch (e) {
+    flog("Error: " + (e && e.message));
+    try { await port.close(); } catch {}
+    conn = null;
+    fsay("Couldn't talk to the reader. Unplug it and plug it back in, close anything else using it (other flasher tabs, serial monitors), then press <b>Connect reader</b> again.", "bad");
+  } finally {
+    fx("flash-connect").disabled = false;
+  }
+});
+
+fx("flash-btn").addEventListener("click", async () => {
+  const fw = conn && fwFiles.find((f) => f.reader && f.reader.chip === conn.reader.chip);
+  if (!fw) return;
+  const { loader, slot, reader } = conn;
+  fx("flash-btn").disabled = fx("flash-connect").disabled = fx("fw-in").disabled = true;
+  fx("flash-bar").hidden = false;
+  fsay(`Flashing the ${reader.name}… keep it plugged in (about a minute).`, "warn");
+  try {
+    await loader.writeFlash({
+      fileArray: [{ data: fw.data, address: slot.offset }],
+      flashMode: "keep", flashFreq: "keep", flashSize: "keep", eraseAll: false, compress: true,
+      reportProgress: (_i, written, total) => { fx("flash-bar").value = written / total; },
+      calculateMD5Hash: md5hex,  // esptool-js then checks the written flash against this.
+    });
+    fx("flash-bar").value = 1;
+    flog("Written and verified. Restarting the reader.");
+    await loader.after("hard_reset");
+    await disconnect();
+    fsay(`Done: the ${reader.name} has the new firmware and is restarting. Your books, progress and settings are untouched.`, "good");
+  } catch (e) {
+    flog("Error: " + (e && e.message));
+    fsay(`Flashing stopped: ${e && e.message}. The reader may not start until it's flashed: press <b>Connect reader</b> and <b>Flash</b> again.`, "bad");
+    await disconnect();
+  } finally {
+    fx("flash-connect").disabled = fx("fw-in").disabled = false;
+    refreshFlashUi();
+  }
+});
+
+if (!("serial" in navigator)) {
+  fsay("Flashing needs Chrome or Edge on a computer (this browser can't reach USB devices). You can still copy the firmware to the SD card instead, as described below.", "warn");
+}
 </script>
 </body>
 </html>
