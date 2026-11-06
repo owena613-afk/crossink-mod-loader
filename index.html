@@ -69,8 +69,10 @@
   .section .offnote { display: none; color: var(--warn); font-size: 13px; }
   .section.off .offnote { display: block; }
   .section.off .setting { opacity: 0.5; }
-  .setting .label { max-width: 600px; }
-  .setting select { max-width: 45%; }
+  .setting .label { flex: 1 1 auto; min-width: 0; }
+  .setting > .switch, .setting > select { flex: none; }
+  .setting select { max-width: 200px; }
+  @media (max-width: 560px) { .setting { flex-wrap: wrap; } }
   code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
 </style>
 </head>
