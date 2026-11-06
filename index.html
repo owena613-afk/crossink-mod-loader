@@ -65,7 +65,12 @@
                      background: var(--card); border-radius: 50%; transition: .15s; }
   .switch input:checked + i { background: var(--accent); }
   .switch input:checked + i::after { left: 21px; }
-  .group-title { font-weight: 700; margin: 8px 0 2px; }
+  .section .where { color: var(--muted); font-size: 13px; margin: -6px 0 8px; }
+  .section .offnote { display: none; color: var(--warn); font-size: 13px; }
+  .section.off .offnote { display: block; }
+  .section.off .setting { opacity: 0.5; }
+  .setting .label { max-width: 600px; }
+  .setting select { max-width: 45%; }
   code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
 </style>
 </head>
@@ -154,7 +159,7 @@
   <section id="tab-settings" hidden>
     <div class="card">
       <h2>Edit a reader's mod settings</h2>
-      <p class="note">The reader keeps its mod settings in <code>/.crosspoint/mods/settings.json</code> on its SD card. Open that file (or start from the defaults), change what you like, save, and copy it back. The reader picks it up the next time it starts or wakes.</p>
+      <p class="note">The reader keeps its mod settings in <code>/.crosspoint/mods/settings.json</code> on its SD card. Open that file (or start from the defaults), change what you like, save, and copy it back. The reader picks it up the next time it starts or wakes. Each reader has its own file, so you can set the two differently.</p>
       <div class="actions">
         <label class="btn ghost" style="display:inline-block">Open settings.json…<input type="file" id="file-in" accept=".json,application/json" hidden></label>
         <button class="btn ghost" id="reset-defaults">Start from defaults</button>
@@ -162,7 +167,7 @@
       </div>
       <div class="status" id="settings-status"></div>
     </div>
-    <div class="card"><div class="settings-list" id="settings-list"></div></div>
+    <div id="settings-list"></div>
   </section>
 </main>
 
@@ -178,49 +183,133 @@ const MODS = [
   { id: "charge_reminder", name: "Charge Reminder", desc: "Sleep-screen badge when a reader is low." },
 ];
 
-// On-device settings (keys and ranges match mods/ModSettings.cpp).
-const ON_OFF = [["0", "Off"], ["1", "On"]];
+// On-device settings (keys and ranges match mods/ModSettings.cpp; defaults match the firmware).
+// Sections follow the reader's menus. `mod` dims a section when that mod is switched off.
 const HOURS = Array.from({ length: 24 }, (_, h) => [String(h), String(h).padStart(2, "0") + ":00"]);
-const SETTINGS = [
-  { group: "Mod Manager" },
-  { key: "modHandoff", label: "Handoff", def: 1, type: "switch" },
-  { key: "statsDailyLog", label: "Advanced Stats (Daily Reading Log)", def: 1, type: "switch" },
-  { key: "modPower", label: "Power Tweaks", def: 1, type: "switch" },
-  { key: "modQuickWake", label: "Quick Wake (Show Page on Wake)", def: 1, type: "switch" },
-  { key: "modNight", label: "Night", def: 1, type: "switch" },
-  { key: "modCharge", label: "Charge Reminder", def: 1, type: "switch" },
-  { group: "Handoff" },
-  { key: "handoffAutoSync", label: "Auto Sync While Asleep", def: 3, type: "select",
-    options: [["0", "Off"], ["1", "Every 15 sec"], ["2", "Every 30 sec"], ["3", "Every 1 min"], ["4", "Every 2 min"]],
-    help: "On the X4, anything but Off keeps it in standby instead of fully off." },
-  { key: "handoffOnWake", label: "Handoff on Wake", def: 5, type: "select",
-    options: [["0", "Off"], ["1", "5 sec"], ["2", "10 sec"], ["3", "20 sec"], ["4", "30 sec"], ["5", "Auto"]] },
-  { key: "handoffBaton", label: "Take Turns Listening", def: 0, type: "switch" },
-  { key: "handoffChargeListen", label: "Listen While Charging", def: 0, type: "switch" },
-  { key: "handoffSendBooks", label: "Send Missing Books", def: 1, type: "switch" },
-  { key: "handoffAllBooks", label: "Sync All Recent Books", def: 1, type: "switch" },
-  { key: "handoffSyncMarks", label: "Sync Bookmarks & Highlights", def: 1, type: "switch" },
-  { key: "handoffBookStats", label: "Combine Book Stats", def: 1, type: "switch" },
-  { key: "handoffShareTime", label: "Share Clock Time", def: 1, type: "switch" },
-  { key: "handoffNightQuiet", label: "Night Quiet Hours", def: 1, type: "switch" },
-  { key: "handoffNightResume", label: "Listen Again At", def: 8, type: "select", options: HOURS },
-  { key: "handoffMorningCheck", label: "Morning Check", def: 1, type: "switch",
-    help: "After a goodnight, broadcast again just after the other reader starts listening in the morning." },
-  { key: "handoffShutdownAfter", label: "Shut Down After Sleeping", def: 0, type: "select",
-    options: [["0", "Off"], ["1", "15 min"], ["2", "30 min"], ["3", "1 hour"], ["4", "2 hours"], ["5", "4 hours"], ["6", "8 hours"]],
-    help: "Stops checking in after this long asleep (the X4 turns fully off). Auto-sleep at night sends the goodnight then, not straight away." },
-  { group: "Night" },
-  { key: "nightStart", label: "Night Starts", def: 23, type: "select", options: HOURS },
-  { key: "nightEnd", label: "Night Ends", def: 4, type: "select", options: HOURS },
-  { key: "nightDarkMode", label: "Dark Mode at Night", def: 0, type: "switch" },
-  { key: "nightSleepSooner", label: "Sleep Sooner at Night", def: 0, type: "select",
-    options: [["0", "Off"], ["1", "2 min"], ["2", "5 min"], ["3", "10 min"], ["4", "15 min"]] },
-  { key: "nightChapterStop", label: "Stop at Chapter End", def: 0, type: "switch" },
-  { group: "Power & Charge" },
-  { key: "homeSleepTimeout", label: "Sleep Outside Books", def: 0, type: "select",
-    options: [["0", "Same as reading"], ["1", "1 min"], ["2", "2 min"], ["3", "3 min"], ["4", "5 min"]] },
-  { key: "chargeReminderPercent", label: "Charge Reminder below (%)", def: 20, type: "number", min: 5, max: 50, step: 5 },
+const PERCENTS = Array.from({ length: 10 }, (_, i) => [String((i + 1) * 5), `${(i + 1) * 5}%`]);
+const SECTIONS = [
+  {
+    title: "Mod Manager",
+    where: "Settings → Mods → Mod Manager",
+    about: "Switch each mod on or off. Off means that part of the reader behaves exactly like stock CrossInk; its data is kept for when you switch it back on.",
+    items: [
+      { key: "modHandoff", label: "Handoff", def: 1, type: "switch",
+        help: "Keeps two readers in step: the book and page you're on, recent books, bookmarks and highlights, and reading stats." },
+      { key: "statsDailyLog", label: "Advanced Stats", def: 1, type: "switch",
+        help: "Records reading per day for the Daily, Weekly and Insights stats pages and the battery reading-time estimate." },
+      { key: "modPower", label: "Power", def: 1, type: "switch",
+        help: "Allows a shorter auto-sleep on Home and in menus (set under Power below)." },
+      { key: "modQuickWake", label: "Quick Wake", def: 1, type: "switch",
+        help: "Keep any sleep screen you like, and see the page you were reading the moment the reader wakes instead of the boot screen." },
+      { key: "modNight", label: "Night", def: 1, type: "switch",
+        help: "Bedtime options: dark mode at night, a shorter auto-sleep in books, and an offer to sleep at the end of a chapter." },
+      { key: "modCharge", label: "Charge Reminder", def: 1, type: "switch",
+        help: "A small \"charge me\" badge on the sleep screen when this reader, or the other one, is low." },
+    ],
+  },
+  {
+    title: "Handoff: syncing",
+    where: "Settings → Mods → Handoff",
+    mod: "modHandoff",
+    about: "How the two readers find each other. With the defaults it all happens on its own: put one down, pick the other up.",
+    items: [
+      { key: "handoffAutoSync", label: "Auto Sync While Asleep", def: 3, type: "select",
+        options: [["0", "Off"], ["1", "Every 15 sec"], ["2", "Every 30 sec"], ["3", "Every 1 min"], ["4", "Every 2 min"]],
+        help: "While asleep, the reader briefly checks for the other one this often and takes any update, so it's already on your page when you pick it up. On the X4 this keeps it in standby instead of fully off (very roughly 10–15 mAh a day at every minute)." },
+      { key: "handoffOnWake", label: "Handoff on Wake", def: 5, type: "select",
+        options: [["0", "Off"], ["1", "5 sec"], ["2", "10 sec"], ["3", "20 sec"], ["4", "30 sec"], ["5", "Auto"]],
+        help: "How long the reader looks for the other one when you wake it. Auto: no wait if this reader already listens while asleep, otherwise just long enough for the other reader's next check-in. Any button skips the wait." },
+      { key: "handoffBaton", label: "Take Turns Listening", def: 0, type: "switch",
+        help: "Saves battery: only the reader that last sent news (the one you put down) keeps listening while asleep; the one that just took the news stops until it has news of its own." },
+      { key: "handoffChargeListen", label: "Listen While Charging", def: 0, type: "switch",
+        help: "Check in every 15 seconds while plugged in, even if Auto Sync is off. The charger covers the cost." },
+    ],
+  },
+  {
+    title: "Handoff: what gets synced",
+    where: "Settings → Mods → Handoff",
+    mod: "modHandoff",
+    about: "What travels between the readers at each sync.",
+    items: [
+      { key: "handoffAllBooks", label: "Sync All Recent Books", def: 1, type: "switch",
+        help: "Positions of every recent book, not just the one you're reading, so switching books on the other reader also lands on the right page." },
+      { key: "handoffSendBooks", label: "Send Missing Books", def: 1, type: "switch",
+        help: "If the other reader doesn't have the book you're reading, send the file over (up to 25 MB) so you can carry on there." },
+      { key: "handoffSyncMarks", label: "Sync Bookmarks & Highlights", def: 1, type: "switch",
+        help: "Bookmarks and highlights of the book being handed over come along with the position." },
+      { key: "handoffBookStats", label: "Combine Book Stats", def: 1, type: "switch",
+        help: "Each book's reading time, pages and \"finished\" mark are combined across both readers, so the stats show your whole reading of it." },
+      { key: "handoffShareTime", label: "Share Clock Time", def: 1, type: "switch",
+        help: "The X4 Pro sends its clock time to the X4, which has no clock of its own. The X4 needs it to date daily stats and for night features." },
+    ],
+  },
+  {
+    title: "Night hours",
+    where: "Settings → Mods → Night (also under Handoff)",
+    mod: ["modHandoff", "modNight"],
+    about: "Your night, in 24-hour local time (it can wrap past midnight). Used by Night Quiet Hours and by the Night mod.",
+    items: [
+      { key: "nightStart", label: "Night Starts", def: 23, type: "select", options: HOURS,
+        help: "From this hour, going to sleep counts as going to bed." },
+      { key: "nightEnd", label: "Night Ends", def: 4, type: "select", options: HOURS,
+        help: "After this hour, going to sleep no longer counts as bedtime." },
+    ],
+  },
+  {
+    title: "Handoff: night and sleep",
+    where: "Settings → Mods → Handoff",
+    mod: "modHandoff",
+    about: "Bedtime: one goodnight from the reader you read in bed lets both readers stop checking in until the morning. Needs the time (the X4 Pro's clock, or the time shared to the X4).",
+    items: [
+      { key: "handoffNightQuiet", label: "Night Quiet Hours", def: 1, type: "switch",
+        help: "Going to sleep during the night hours sends a goodnight: your latest page plus \"quiet until morning\". With Lock Screen After on, an auto-sleep sends it at the lock point instead; holding Power sends it at once. Both readers then sleep straight through without checking in." },
+      { key: "handoffNightResume", label: "Listen Again At", def: 8, type: "select", options: HOURS,
+        help: "When both readers start checking in again after a goodnight." },
+      { key: "handoffLockAfter", label: "Lock Screen After", def: 2, type: "select",
+        options: [["0", "Off"], ["1", "15 min"], ["2", "30 min"], ["3", "1 hour"], ["4", "2 hours"], ["5", "4 hours"], ["6", "8 hours"]],
+        help: "For an auto-sleep (no buttons for a while) that leaves your page on screen: after this long, switch to your sleep image. At night the goodnight waits until then, so dozing off for a few minutes and picking the reader back up doesn't send the other reader to sleep. Holding Power still sends the goodnight at once." },
+      { key: "handoffMorningCheck", label: "Morning Check", def: 1, type: "switch",
+        help: "The reader that sent the goodnight wakes a couple of minutes after Listen Again At and syncs once more, so anything read overnight on either reader reaches the other. If nothing answers, it tries again 10 minutes later." },
+    ],
+  },
+  {
+    title: "Night",
+    where: "Settings → Mods → Night",
+    mod: "modNight",
+    about: "Optional bedtime touches during the night hours above (needs the time).",
+    items: [
+      { key: "nightDarkMode", label: "Dark Mode at Night", def: 0, type: "switch",
+        help: "Switch to dark mode (light text on black) during the night hours, and back afterwards." },
+      { key: "nightSleepSooner", label: "Sleep Sooner at Night", def: 0, type: "select",
+        options: [["0", "Off"], ["1", "2 min"], ["2", "5 min"], ["3", "10 min"], ["4", "15 min"]],
+        help: "A shorter auto-sleep inside books during the night hours, for when you drift off. Never longer than your normal Time to Sleep." },
+      { key: "nightChapterStop", label: "Stop at Chapter End", def: 0, type: "switch",
+        help: "At night, finishing a chapter shows \"Chapter done. Sleeping soon\" and the reader sleeps after 15 seconds unless you press a button." },
+    ],
+  },
+  {
+    title: "Power",
+    where: "Settings → Mods → Power",
+    mod: "modPower",
+    about: "",
+    items: [
+      { key: "homeSleepTimeout", label: "Sleep Outside Books", def: 0, type: "select",
+        options: [["0", "Same as reading"], ["1", "1 min"], ["2", "2 min"], ["3", "3 min"], ["4", "5 min"]],
+        help: "Auto-sleep sooner on Home, Library and menus. Inside a book your normal Time to Sleep applies. Only ever shortens it." },
+    ],
+  },
+  {
+    title: "Charge Reminder",
+    where: "Settings → Mods → Charge Reminder",
+    mod: "modCharge",
+    about: "",
+    items: [
+      { key: "chargeReminderPercent", label: "Remind Below", def: 20, type: "select", options: PERCENTS,
+        help: "Show the badge when this reader, or the other one (as of the last sync), is at or below this level." },
+    ],
+  },
 ];
+const SETTINGS = SECTIONS.flatMap((section) => section.items);
 const HIDDEN_KEYS = ["nightDarkApplied"];  // Internal state the reader manages; kept as loaded.
 
 // ---------------------------------------------------------------------------
@@ -331,37 +420,41 @@ function defaults() {
   extra = { nightDarkApplied: 0 };
 }
 
+function sectionOn(section) {
+  if (!section.mod) return true;
+  const mods = Array.isArray(section.mod) ? section.mod : [section.mod];
+  return mods.some((k) => values[k]);
+}
+
+function controlFor(s) {
+  if (s.type === "switch") {
+    return `<label class="switch"><input type="checkbox" data-key="${s.key}" ${values[s.key] ? "checked" : ""} aria-label="${s.label}"><i></i></label>`;
+  }
+  return `<select data-key="${s.key}" aria-label="${s.label}">${s.options.map(([v, t]) =>
+    `<option value="${v}" ${String(values[s.key]) === v ? "selected" : ""}>${t}${Number(v) === s.def ? " (default)" : ""}</option>`).join("")}</select>`;
+}
+
 function renderSettings() {
   const list = $("settings-list");
   list.innerHTML = "";
-  SETTINGS.forEach((s) => {
-    if (s.group) {
-      const g = document.createElement("div");
-      g.className = "group-title";
-      g.textContent = s.group;
-      list.appendChild(g);
-      return;
-    }
-    const row = document.createElement("div");
-    row.className = "setting";
-    const label = `<div class="label"><b>${s.label}</b>${s.help ? `<span>${s.help}</span>` : ""}</div>`;
-    let control = "";
-    if (s.type === "switch") {
-      control = `<label class="switch"><input type="checkbox" data-key="${s.key}" ${values[s.key] ? "checked" : ""}><i></i></label>`;
-    } else if (s.type === "select") {
-      control = `<select data-key="${s.key}">${s.options.map(([v, t]) => `<option value="${v}" ${String(values[s.key]) === v ? "selected" : ""}>${t}</option>`).join("")}</select>`;
-    } else {
-      control = `<input type="number" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${values[s.key]}">`;
-    }
-    row.innerHTML = label + control;
-    list.appendChild(row);
+  SECTIONS.forEach((section) => {
+    const card = document.createElement("div");
+    card.className = "card section" + (sectionOn(section) ? "" : " off");
+    card.innerHTML = `<h2>${section.title}</h2><p class="where">On the reader: ${section.where}</p>` +
+      (section.about ? `<p class="note">${section.about}</p>` : "") +
+      (section.mod ? `<p class="offnote">This mod is switched off in the Mod Manager, so these settings do nothing until you switch it back on.</p>` : "") +
+      section.items.map((s) =>
+        `<div class="setting"><div class="label"><b>${s.label}</b><span>${s.help}</span></div>${controlFor(s)}</div>`).join("");
+    list.appendChild(card);
   });
   list.querySelectorAll("[data-key]").forEach((el) => {
     el.addEventListener("change", () => {
       const s = SETTINGS.find((x) => x.key === el.dataset.key);
-      if (s.type === "switch") values[s.key] = el.checked ? 1 : 0;
-      else if (s.type === "select") values[s.key] = Number(el.value);
-      else values[s.key] = Math.min(s.max, Math.max(s.min, Math.round(Number(el.value) / s.step) * s.step || s.def));
+      values[s.key] = s.type === "switch" ? (el.checked ? 1 : 0) : Number(el.value);
+      if (s.key.startsWith("mod") || s.key === "statsDailyLog") {
+        // Mod switched: refresh the dimming of its sections.
+        SECTIONS.forEach((section, i) => list.children[i].classList.toggle("off", !sectionOn(section)));
+      }
     });
   });
 }
