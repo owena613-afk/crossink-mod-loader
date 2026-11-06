@@ -69,6 +69,7 @@
   .section .offnote { display: none; color: var(--warn); font-size: 13px; }
   .section.off .offnote { display: block; }
   .section.off .setting { opacity: 0.5; }
+  .setting .only { font-style: normal; font-weight: 400; font-size: 12px; color: var(--muted); border: 1px solid currentColor; border-radius: 4px; padding: 0 5px; margin-left: 6px; }
   .setting .label { flex: 1 1 auto; min-width: 0; }
   .setting > .switch, .setting > select { flex: none; }
   .setting select { max-width: 200px; }
@@ -183,6 +184,7 @@ const MODS = [
   { id: "quick_wake", name: "Quick Wake", desc: "Your page on wake instead of the boot screen." },
   { id: "night", name: "Night", desc: "Dark mode at night, sleep sooner, stop at chapter end." },
   { id: "charge_reminder", name: "Charge Reminder", desc: "Sleep-screen badge when a reader is low." },
+  { id: "quick_sleep", name: "Quick Sleep", desc: "Straight to the sleep screen, without the \"Going to sleep\" popup first (X4)." },
 ];
 
 // On-device settings (keys and ranges match mods/ModSettings.cpp; defaults match the firmware).
@@ -207,6 +209,8 @@ const SECTIONS = [
         help: "Bedtime options: dark mode at night, a shorter auto-sleep in books, and an offer to sleep at the end of a chapter." },
       { key: "modCharge", label: "Charge Reminder", def: 1, type: "switch",
         help: "A small \"charge me\" badge on the sleep screen when this reader, or the other one, is low." },
+      { key: "modQuickSleep", label: "Quick Sleep", only: "X4 only", def: 1, type: "switch",
+        help: "Go straight to the sleep screen instead of showing a \"Going to sleep\" popup first: one screen refresh instead of two. The X4 Pro already works this way, so the switch only appears on the X4." },
     ],
   },
   {
@@ -241,8 +245,8 @@ const SECTIONS = [
         help: "Bookmarks and highlights of the book being handed over come along with the position." },
       { key: "handoffBookStats", label: "Combine Book Stats", def: 1, type: "switch",
         help: "Each book's reading time, pages and \"finished\" mark are combined across both readers, so the stats show your whole reading of it." },
-      { key: "handoffShareTime", label: "Share Clock Time", def: 1, type: "switch",
-        help: "The X4 Pro sends its clock time to the X4, which has no clock of its own. The X4 needs it to date daily stats and for night features." },
+      { key: "handoffShareTime", label: "Share Clock Time", only: "X4 Pro only", def: 1, type: "switch",
+        help: "The X4 Pro sends its clock time to the X4, which has no clock of its own. The X4 needs it to date daily stats and for night features. The X4 always accepts the time, so this switch only appears on the X4 Pro." },
     ],
   },
   {
@@ -446,7 +450,7 @@ function renderSettings() {
       (section.about ? `<p class="note">${section.about}</p>` : "") +
       (section.mod ? `<p class="offnote">This mod is switched off in the Mod Manager, so these settings do nothing until you switch it back on.</p>` : "") +
       section.items.map((s) =>
-        `<div class="setting"><div class="label"><b>${s.label}</b><span>${s.help}</span></div>${controlFor(s)}</div>`).join("");
+        `<div class="setting"><div class="label"><b>${s.label}${s.only ? `<em class="only">${s.only}</em>` : ""}</b><span>${s.help}</span></div>${controlFor(s)}</div>`).join("");
     list.appendChild(card);
   });
   list.querySelectorAll("[data-key]").forEach((el) => {
