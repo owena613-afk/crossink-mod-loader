@@ -220,6 +220,7 @@ const MODS = [
   { id: "quick_wake", name: "Quick Wake", desc: "Your page on wake instead of the boot screen." },
   { id: "night", name: "Night", desc: "Dark mode at night, sleep sooner, stop at chapter end." },
   { id: "charge_reminder", name: "Charge Reminder", desc: "Sleep-screen badge when a reader is low." },
+  { id: "lock_screen", name: "Lock Screen", desc: "Show your sleep image after a while asleep, when an auto-sleep left your page up." },
   { id: "quick_sleep", name: "Quick Sleep", desc: "Straight to the sleep screen, without the \"Going to sleep\" popup first (X4)." },
 ];
 
@@ -245,6 +246,8 @@ const SECTIONS = [
         help: "Bedtime options: dark mode at night, a shorter auto-sleep in books, and an offer to sleep at the end of a chapter." },
       { key: "modCharge", label: "Charge Reminder", def: 1, type: "switch",
         help: "A small \"charge me\" badge on the sleep screen when this reader, or the other one, is low." },
+      { key: "modLockScreen", label: "Lock Screen", def: 1, type: "switch",
+        help: "When an auto-sleep leaves your page on screen, switch to your sleep image after a while asleep (set under Lock Screen below). The reader stays asleep; only the screen changes." },
       { key: "modQuickSleep", label: "Quick Sleep", only: "X4 only", def: 1, type: "switch",
         help: "Go straight to the sleep screen instead of showing a \"Going to sleep\" popup first: one screen refresh instead of two. The X4 Pro already works this way, so the switch only appears on the X4." },
     ],
@@ -304,14 +307,22 @@ const SECTIONS = [
     about: "Bedtime: one goodnight from the reader you read in bed lets both readers stop checking in until the morning. Needs the time (the X4 Pro's clock, or the time shared to the X4).",
     items: [
       { key: "handoffNightQuiet", label: "Night Quiet Hours", def: 1, type: "switch",
-        help: "Going to sleep during the night hours sends a goodnight: your latest page plus \"quiet until morning\". With Lock Screen After on, an auto-sleep sends it at the lock point instead; holding Power sends it at once. Both readers then sleep straight through without checking in." },
+        help: "Going to sleep during the night hours sends a goodnight: your latest page plus \"quiet until morning\". When the Lock Screen mod will switch an auto-sleep to your sleep image later, the goodnight waits until then; holding Power sends it at once. Both readers then sleep straight through without checking in." },
       { key: "handoffNightResume", label: "Listen Again At", def: 8, type: "select", options: HOURS,
         help: "When both readers start checking in again after a goodnight." },
-      { key: "handoffLockAfter", label: "Lock Screen After", def: 2, type: "select",
-        options: [["0", "Off"], ["1", "15 min"], ["2", "30 min"], ["3", "1 hour"], ["4", "2 hours"], ["5", "4 hours"], ["6", "8 hours"]],
-        help: "For an auto-sleep (no buttons for a while) that leaves your page on screen: after this long, switch to your sleep image. At night the goodnight waits until then, so dozing off for a few minutes and picking the reader back up doesn't send the other reader to sleep. Holding Power still sends the goodnight at once. Works on a reader that isn't paired too." },
       { key: "handoffMorningCheck", label: "Morning Check", def: 1, type: "switch",
         help: "The reader that sent the goodnight wakes a couple of minutes after Listen Again At and syncs once more, so anything read overnight on either reader reaches the other. If nothing answers, it tries again 10 minutes later." },
+    ],
+  },
+  {
+    title: "Lock Screen",
+    where: "Settings → Mods → Lock Screen",
+    mod: "modLockScreen",
+    about: "Going to sleep and showing the sleep image, separated. An auto-sleep with CrossInk's Quick Resume after timeout leaves your page on screen so you can carry on; after a while asleep, this puts your sleep image up instead. Works on its own, with or without Handoff.",
+    items: [
+      { key: "lockScreenAfter", label: "Sleep Image After", def: 2, type: "select",
+        options: [["0", "Off"], ["1", "15 min"], ["2", "30 min"], ["3", "1 hour"], ["4", "2 hours"], ["5", "4 hours"], ["6", "8 hours"]],
+        help: "How long the page stays up after an auto-sleep before your sleep image replaces it. Waking still shows your page at once (Quick Wake). With Handoff at night, the goodnight waits until this point, so dozing off for a few minutes and picking the reader back up doesn't send the other reader to sleep." },
     ],
   },
   {
